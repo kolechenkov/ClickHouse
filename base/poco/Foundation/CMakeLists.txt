@@ -5,6 +5,9 @@ file (GLOB SRCS_PCRE src/pcre_*.c)
 add_library (_poco_foundation_pcre ${SRCS_PCRE})
 add_library (Poco::Foundation::PCRE ALIAS _poco_foundation_pcre)
 
+# TODO: Remove this. We generally like to compile with C++23 but poco isn't ready yet.
+set (CMAKE_CXX_STANDARD 20)
+
 # TODO: remove these warning exclusions
 target_compile_options (_poco_foundation_pcre
     PRIVATE

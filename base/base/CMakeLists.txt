@@ -2,6 +2,10 @@ if (USE_CLANG_TIDY)
     set (CMAKE_CXX_CLANG_TIDY "${CLANG_TIDY_PATH}")
 endif ()
 
+# TODO: Remove this. We generally like to compile with C++23 but Clang currently crashes with our libcxx
+# when instantiated from JSON.cpp.
+set (CMAKE_CXX_STANDARD 20)
+
 set (SRCS
     argsToConfig.cpp
     coverage.cpp

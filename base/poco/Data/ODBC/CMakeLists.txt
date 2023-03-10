@@ -3,6 +3,10 @@ if (ENABLE_ODBC)
         message(FATAL_ERROR "Configuration error: unixodbc is not a target")
     endif()
 
+
+    # TODO: Remove this. We generally like to compile with C++23 but poco isn't ready yet.
+    set (CMAKE_CXX_STANDARD 20)
+
     set (SRCS
         src/Binder.cpp
         src/ConnectionHandle.cpp
