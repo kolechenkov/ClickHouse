@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Core/Block.h>
+#include <Common/CacheBase.h>
 #include <Parsers/IAST_fwd.h>
 #include <Poco/Util/LayeredConfiguration.h>
 #include <Processors/Chunk.h>
@@ -73,8 +74,14 @@ private:
         size_t operator()(const Key & key) const;
     };
 
+    struct QueryResultWeightFunction
+    {
+        size_t operator()(const QueryResult &) const;
+    };
+
     /// query --> query result
-    using Cache = std::unordered_map<Key, QueryResult, KeyHasher>;
+    /// using Cache = std::unordered_map<Key, QueryResult, KeyHasher>;
+    using Cache = CacheBase<Key, QueryResult, KeyHasher, QueryResultWeightFunction>;
 
     /// query --> query execution count
     using TimesExecuted = std::unordered_map<Key, size_t, KeyHasher>;
@@ -128,7 +135,7 @@ public:
         bool hasCacheEntryForKey() const;
         Pipe && getPipe(); /// must be called only if hasCacheEntryForKey() returns true
     private:
-        Reader(const Cache & cache_, const Key & key, size_t & cache_size_in_bytes_, const std::lock_guard<std::mutex> &);
+        Reader(Cache & cache_, const Key & key, size_t & cache_size_in_bytes_, const std::lock_guard<std::mutex> &);
         Pipe pipe;
         friend class QueryCache; /// for createReader()
     };
@@ -144,15 +151,8 @@ public:
     size_t recordQueryRun(const Key & key);
 
 private:
-    /// Implementation note: The query result implements a custom caching mechanism and doesn't make use of CacheBase, unlike many other
-    /// internal caches in ClickHouse. The main reason is that we don't need standard CacheBase (S)LRU eviction as the expiry times
-    /// associated with cache entries provide a "natural" eviction criterion. As a future TODO, we could make an expiry-based eviction
-    /// policy and use that with CacheBase (e.g. see #23706)
-    /// TODO To speed up removal of stale entries, we could also add another container sorted on expiry times which maps keys to iterators
-    /// into the cache. To insert an entry, add it to the cache + add the iterator to the sorted container. To remove stale entries, do a
-    /// binary search on the sorted container and erase all left of the found key.
     mutable std::mutex mutex;
-    Cache cache TSA_GUARDED_BY(mutex);
+    Cache cache; // TODO TSA TODO inherit from CB?
     TimesExecuted times_executed TSA_GUARDED_BY(mutex);
 
     /// Cache configuration

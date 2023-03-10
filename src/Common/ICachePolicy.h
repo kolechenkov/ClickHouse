@@ -30,7 +30,12 @@ public:
 
     virtual void reset(std::lock_guard<std::mutex> & /*cache_lock*/) = 0;
     virtual void remove(const Key & key, std::lock_guard<std::mutex> & /*cache_lock*/) = 0;
+
     virtual MappedPtr get(const Key & key, std::lock_guard<std::mutex> & /*cache_lock*/) = 0;
+    /// HashFunction may hash only parts of the key. In that case, the key of the found entry can be
+    /// different than the provided key. Return the found key then.
+    virtual std::optional<std::pair<Key, MappedPtr>> getWithKey(const Key & key, std::lock_guard<std::mutex> & /*cache_lock*/) = 0;
+
     virtual void set(const Key & key, const MappedPtr & mapped, std::lock_guard<std::mutex> & /*cache_lock*/) = 0;
 
     virtual ~ICachePolicy() = default;

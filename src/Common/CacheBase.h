@@ -4,6 +4,7 @@
 #include <Common/ICachePolicy.h>
 #include <Common/LRUCachePolicy.h>
 #include <Common/SLRUCachePolicy.h>
+#include <Common/TTLCachePolicy.h>
 
 #include <atomic>
 #include <cassert>
@@ -56,6 +57,11 @@ public:
             using SLRUPolicy = SLRUCachePolicy<TKey, TMapped, HashFunction, WeightFunction>;
             policy = std::make_unique<SLRUPolicy>(max_size_in_bytes, max_entries, size_ratio, on_weight_loss_function);
         }
+        else if (policy_name == "TTL")
+        {
+            using TTLPolicy = TTLCachePolicy<TKey, TMapped, HashFunction, WeightFunction>;
+            policy = std::make_unique<TTLPolicy>(max_size_in_bytes, max_entries, on_weight_loss_function);
+        }
         else
         {
             throw Exception(ErrorCodes::BAD_ARGUMENTS, "Undeclared cache policy name: {}", policy_name);
@@ -67,6 +73,18 @@ public:
         std::lock_guard lock(mutex);
         auto res = policy->get(key, lock);
         if (res)
+            ++hits;
+        else
+            ++misses;
+
+        return res;
+    }
+
+    std::optional<std::pair<Key, MappedPtr>> getWithKey(const Key & key)
+    {
+        std::lock_guard lock(mutex);
+        auto res = policy->getWithKey(key, lock);
+        if (res.has_value())
             ++hits;
         else
             ++misses;
