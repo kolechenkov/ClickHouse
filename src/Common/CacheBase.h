@@ -27,7 +27,7 @@ namespace ErrorCodes
 /// (default policy evicts entries which are not used for a long time).
 /// WeightFunction is a functor that takes Mapped as a parameter and returns "weight" (approximate size)
 /// of that value.
-/// Cache starts to evict entries when their total weight exceeds max_size.
+/// Cache starts to evict entries when their total weight exceeds max_size_in_bytes.
 /// Value weight should not change after insertion.
 template <typename TKey, typename TMapped, typename HashFunction = std::hash<TKey>, typename WeightFunction = TrivialWeightFunction<TMapped>>
 class CacheBase
@@ -37,33 +37,35 @@ public:
     using Mapped = TMapped;
     using MappedPtr = std::shared_ptr<Mapped>;
 
-    explicit CacheBase(size_t max_size, size_t max_elements_size = 0, String cache_policy_name = "", double size_ratio = 0.5)
+    explicit CacheBase(size_t max_size_in_bytes, size_t max_entries = 0, std::string_view policy_name = {}, double size_ratio = 0.5)
     {
         auto on_weight_loss_function = [&](size_t weight_loss) { onRemoveOverflowWeightLoss(weight_loss); };
 
-        if (cache_policy_name.empty())
-            cache_policy_name = default_cache_policy_name;
+        constexpr std::string_view default_policy_name = "SLRU";
 
-        if (cache_policy_name == "LRU")
+        if (policy_name.empty())
+            policy_name = default_policy_name;
+
+        if (policy_name == "LRU")
         {
             using LRUPolicy = LRUCachePolicy<TKey, TMapped, HashFunction, WeightFunction>;
-            cache_policy = std::make_unique<LRUPolicy>(max_size, max_elements_size, on_weight_loss_function);
+            policy = std::make_unique<LRUPolicy>(max_size_in_bytes, max_entries, on_weight_loss_function);
         }
-        else if (cache_policy_name == "SLRU")
+        else if (policy_name == "SLRU")
         {
             using SLRUPolicy = SLRUCachePolicy<TKey, TMapped, HashFunction, WeightFunction>;
-            cache_policy = std::make_unique<SLRUPolicy>(max_size, max_elements_size, size_ratio, on_weight_loss_function);
+            policy = std::make_unique<SLRUPolicy>(max_size_in_bytes, max_entries, size_ratio, on_weight_loss_function);
         }
         else
         {
-            throw Exception(ErrorCodes::BAD_ARGUMENTS, "Undeclared cache policy name: {}", cache_policy_name);
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "Undeclared cache policy name: {}", policy_name);
         }
     }
 
     MappedPtr get(const Key & key)
     {
         std::lock_guard lock(mutex);
-        auto res = cache_policy->get(key, lock);
+        auto res = policy->get(key, lock);
         if (res)
             ++hits;
         else
@@ -75,7 +77,7 @@ public:
     void set(const Key & key, const MappedPtr & mapped)
     {
         std::lock_guard lock(mutex);
-        cache_policy->set(key, mapped, lock);
+        policy->set(key, mapped, lock);
     }
 
     /// If the value for the key is in the cache, returns it. If it is not, calls load_func() to
@@ -92,7 +94,7 @@ public:
         InsertTokenHolder token_holder;
         {
             std::lock_guard cache_lock(mutex);
-            auto val = cache_policy->get(key, cache_lock);
+            auto val = policy->get(key, cache_lock);
             if (val)
             {
                 ++hits;
@@ -130,7 +132,7 @@ public:
         auto token_it = insert_tokens.find(key);
         if (token_it != insert_tokens.end() && token_it->second.get() == token)
         {
-            cache_policy->set(key, token->value, cache_lock);
+            policy->set(key, token->value, cache_lock);
             result = true;
         }
 
@@ -153,31 +155,31 @@ public:
         insert_tokens.clear();
         hits = 0;
         misses = 0;
-        cache_policy->reset(lock);
+        policy->reset(lock);
     }
 
     void remove(const Key & key)
     {
         std::lock_guard lock(mutex);
-        cache_policy->remove(key, lock);
+        policy->remove(key, lock);
     }
 
     size_t weight() const
     {
         std::lock_guard lock(mutex);
-        return cache_policy->weight(lock);
+        return policy->weight(lock);
     }
 
     size_t count() const
     {
         std::lock_guard lock(mutex);
-        return cache_policy->count(lock);
+        return policy->count(lock);
     }
 
     size_t maxSize() const
-        TSA_NO_THREAD_SAFETY_ANALYSIS // disabled because max_size of cache_policy is a constant parameter
+        TSA_NO_THREAD_SAFETY_ANALYSIS // disabled because max_size_in_bytes of policy is a constant parameter
     {
-        return cache_policy->maxSize();
+        return policy->maxSize();
     }
 
     virtual ~CacheBase() = default;
@@ -188,9 +190,7 @@ protected:
 private:
     using CachePolicy = ICachePolicy<TKey, TMapped, HashFunction, WeightFunction>;
 
-    std::unique_ptr<CachePolicy> cache_policy TSA_GUARDED_BY(mutex);
-
-    inline static const String default_cache_policy_name = "SLRU";
+    std::unique_ptr<CachePolicy> policy TSA_GUARDED_BY(mutex);
 
     std::atomic<size_t> hits{0};
     std::atomic<size_t> misses{0};
